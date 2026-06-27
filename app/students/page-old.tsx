@@ -6,34 +6,9 @@ import { AppShell } from "@/components/app-shell";
 import { DataTable } from "@/components/data-table";
 import { fetchList } from "@/lib/resource";
 
-// 👇 If your students route isn't /accounts/students, change this one line.
+// 👇 If your students route isn't /students, change this one line.
 const STUDENTS_ENDPOINT = "/accounts/students";
 
-// Leave "" to auto-detect the id field; or set the exact field name the
-// /accounts/students/{id} endpoint expects, e.g. "id" or "illumineId".
-const STUDENT_ID_FIELD = "";
-
-const ID_CANDIDATES = [
-  "id",
-  "studentId",
-  "student_id",
-  "Id",
-  "ID",
-  "illumineId",
-  "illumine_id",
-];
-
-function getRowId(row: Record<string, unknown>): string | null {
-  if (STUDENT_ID_FIELD) {
-    const v = row[STUDENT_ID_FIELD];
-    return v === undefined || v === null || v === "" ? null : String(v);
-  }
-  for (const field of ID_CANDIDATES) {
-    const v = row[field];
-    if (v !== undefined && v !== null && v !== "") return String(v);
-  }
-  return null;
-}
 
 export default function StudentsPage() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -90,20 +65,7 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {!loading && !error && matched && (
-        <>
-          <DataTable
-            rows={rows}
-            getRowHref={(row) => {
-              const id = getRowId(row);
-              return id ? `/students/${encodeURIComponent(id)}` : null;
-            }}
-          />
-          <p className="mt-3 text-xs text-muted-foreground">
-            Click a row to open the student.
-          </p>
-        </>
-      )}
+      {!loading && !error && matched && <DataTable rows={rows} />}
 
       {!loading && !error && !matched && (
         <div className="rounded-md border p-4 text-sm">

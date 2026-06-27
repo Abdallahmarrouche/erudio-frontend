@@ -1,9 +1,10 @@
 // components/data-table.tsx
 "use client";
 
-// Turns field keys into readable headers: illumine_id -> "Illumine Id",
-// firstName -> "First Name".
-function prettify(key: string): string {
+import { useRouter } from "next/navigation";
+
+// Exported so the student detail page can reuse the same formatting.
+export function prettifyKey(key: string): string {
   return key
     .replace(/_/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -11,7 +12,7 @@ function prettify(key: string): string {
     .trim();
 }
 
-function renderCell(value: unknown): string {
+export function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "object") {
     try {
@@ -23,11 +24,19 @@ function renderCell(value: unknown): string {
   return String(value);
 }
 
+interface DataTableProps {
+  rows: Record<string, unknown>[];
+  /** Return a URL to make a row clickable, or null to leave it static. */
+  getRowHref?: (row: Record<string, unknown>) => string | null;
+}
+
 /**
  * Renders any array of objects as a table. Columns are the union of all keys
- * found across the rows, so you don't have to declare them up front.
+ * across the rows. Pass getRowHref to make rows navigate on click.
  */
-export function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
+export function DataTable({ rows, getRowHref }: DataTableProps) {
+  const router = useRouter();
+
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No records found.</p>;
   }
@@ -49,21 +58,33 @@ export function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
                 key={col}
                 className="whitespace-nowrap px-4 py-2 text-left font-medium text-muted-foreground"
               >
-                {prettify(col)}
+                {prettifyKey(col)}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
-              {columns.map((col) => (
-                <td key={col} className="whitespace-nowrap px-4 py-2">
-                  {renderCell(row[col])}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row, i) => {
+            const href = getRowHref?.(row) ?? null;
+            return (
+              <tr
+                key={i}
+                onClick={href ? () => router.push(href) : undefined}
+                className={
+                  "border-b last:border-0 " +
+                  (href
+                    ? "cursor-pointer hover:bg-muted/40"
+                    : "hover:bg-muted/30")
+                }
+              >
+                {columns.map((col) => (
+                  <td key={col} className="whitespace-nowrap px-4 py-2">
+                    {formatValue(row[col])}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
