@@ -30,44 +30,11 @@ export class ApiError extends Error {
   }
 }
 
-// Pull a readable string out of whatever shape an error response takes:
-// plain string, { message }, { error }, nested { error: { message } }, etc.
-// Falls back to the raw JSON so an error is never swallowed as "[object Object]".
-function extractErrorMessage(data: unknown): string | null {
-  if (typeof data === "string") return data || null;
-  if (!data || typeof data !== "object") return null;
-  const obj = data as Record<string, unknown>;
-
-  for (const k of ["message", "error", "detail", "title", "description"]) {
-    if (typeof obj[k] === "string" && obj[k]) return obj[k] as string;
-  }
-
-  const nested = obj.error ?? obj.message;
-  if (nested && typeof nested === "object") {
-    const n = nested as Record<string, unknown>;
-    for (const k of ["message", "detail", "code", "title", "description"]) {
-      if (typeof n[k] === "string" && n[k]) return n[k] as string;
-    }
-    try {
-      return JSON.stringify(nested);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  try {
-    return JSON.stringify(obj);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Thin fetch wrapper.
  * - Prefixes NEXT_PUBLIC_API_BASE_URL
  * - Attaches `Authorization: Bearer <token>` if a token is stored
- * - Throws ApiError(status, readableMessage) on non-2xx
- * - Tolerates empty and non-JSON bodies on success
+ * - Throws ApiError on non-2xx so callers can try/catch
  */
 export async function apiFetch<T = unknown>(
   path: string,
@@ -81,26 +48,20 @@ export async function apiFetch<T = unknown>(
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
-  const bodyText = await res.text().catch(() => "");
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
-    if (bodyText) {
-      try {
-        message = extractErrorMessage(JSON.parse(bodyText)) ?? bodyText;
-      } catch {
-        message = bodyText; // non-JSON error body
-      }
+    try {
+      const data = await res.json();
+      message = data.message ?? data.error ?? message;
+    } catch {
+      /* error body wasn't JSON — keep the default message */
     }
     throw new ApiError(res.status, message);
   }
 
-  if (res.status === 204 || !bodyText) return undefined as T;
-  try {
-    return JSON.parse(bodyText) as T;
-  } catch {
-    return bodyText as unknown as T; // non-JSON success body
-  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
 }
 
 // --- Login ------------------------------------------------------------------
