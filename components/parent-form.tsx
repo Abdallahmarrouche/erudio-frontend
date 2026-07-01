@@ -1,7 +1,7 @@
 // components/parent-form.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,15 @@ const EMPTY: ParentFormValues = {
   spouseEmiratesId: "", spousePassportNumber: "",
 };
 
+// Pull the etag out of a single-record GET response (body field, not a header).
+function readEtag(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const rec = (obj.data && typeof obj.data === "object" ? obj.data : obj) as Record<string, unknown>;
+  const tag = rec.etag ?? obj.etag;
+  return tag != null ? String(tag) : null;
+}
+
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -72,8 +81,23 @@ export function ParentForm({
 }) {
   const router = useRouter();
   const [f, setF] = useState<ParentFormValues>({ ...EMPTY, ...(initial ?? {}) });
+  const [etag, setEtag] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit mode: capture the current record's etag (sent back as If-Match on save).
+  useEffect(() => {
+    if (mode !== "edit" || !parentId) return;
+    let cancelled = false;
+    (async () => {
+      const raw = await apiFetch(`${PARENTS_ENDPOINT}/${encodeURIComponent(parentId)}`).catch(() => null);
+      if (cancelled) return;
+      setEtag(readEtag(raw));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, parentId]);
 
   function set<K extends keyof ParentFormValues>(k: K, v: string) {
     setF((p) => ({ ...p, [k]: v }));
@@ -124,9 +148,21 @@ export function ParentForm({
     setSaving(true);
     try {
       const path = mode === "create" ? PARENTS_ENDPOINT : `${PARENTS_ENDPOINT}/${encodeURIComponent(parentId!)}`;
+
+      // Edit mode requires If-Match. Use the etag captured on load; if it didn't
+      // arrive yet, fetch the record once more to get a fresh one.
+      let ifMatch = etag;
+      if (mode === "edit" && !ifMatch) {
+        ifMatch = readEtag(await apiFetch(path).catch(() => null));
+      }
+      if (mode === "edit" && !ifMatch) {
+        throw new Error("Couldn’t read this parent’s current version. Refresh the page and try again.");
+      }
+
       const res = (await apiFetch(path, {
         method: mode === "create" ? "POST" : "PUT",
         body: JSON.stringify(body),
+        ...(mode === "edit" && ifMatch ? { headers: { "If-Match": ifMatch } } : {}),
       })) as Record<string, unknown>;
       const data = (res?.data as Record<string, unknown>) ?? res;
       const id = data?.id ? String(data.id) : parentId ?? "";

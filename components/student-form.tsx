@@ -40,6 +40,14 @@ function toRows(raw: unknown): Record<string, unknown>[] {
   }
   return [];
 }
+// Pull the etag out of a single-record GET response (body field, not a header).
+function readEtag(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const rec = (obj.data && typeof obj.data === "object" ? obj.data : obj) as Record<string, unknown>;
+  const tag = rec.etag ?? obj.etag;
+  return tag != null ? String(tag) : null;
+}
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -64,9 +72,11 @@ export function StudentForm({
   const router = useRouter();
   const [f, setF] = useState<StudentFormValues>({ ...EMPTY, ...(initial ?? {}) });
   const [parents, setParents] = useState<Record<string, unknown>[]>([]);
+  const [etag, setEtag] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Create mode: load the parent dropdown.
   useEffect(() => {
     if (mode !== "create") return;
     let cancelled = false;
@@ -91,6 +101,20 @@ export function StudentForm({
       cancelled = true;
     };
   }, [mode]);
+
+  // Edit mode: capture the current record's etag (sent back as If-Match on save).
+  useEffect(() => {
+    if (mode !== "edit" || !studentId) return;
+    let cancelled = false;
+    (async () => {
+      const raw = await apiFetch(`${STUDENTS_ENDPOINT}/${encodeURIComponent(studentId)}`).catch(() => null);
+      if (cancelled) return;
+      setEtag(readEtag(raw));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, studentId]);
 
   function set<K extends keyof StudentFormValues>(k: K, v: string) {
     setF((p) => ({ ...p, [k]: v }));
@@ -127,9 +151,21 @@ export function StudentForm({
     setSaving(true);
     try {
       const path = mode === "create" ? STUDENTS_ENDPOINT : `${STUDENTS_ENDPOINT}/${encodeURIComponent(studentId!)}`;
+
+      // Edit mode requires If-Match. Use the etag we captured on load; if it
+      // didn't arrive yet, fetch the record once more to get a fresh one.
+      let ifMatch = etag;
+      if (mode === "edit" && !ifMatch) {
+        ifMatch = readEtag(await apiFetch(path).catch(() => null));
+      }
+      if (mode === "edit" && !ifMatch) {
+        throw new Error("Couldn’t read this student’s current version. Refresh the page and try again.");
+      }
+
       const res = (await apiFetch(path, {
         method: mode === "create" ? "POST" : "PUT",
         body: JSON.stringify(body),
+        ...(mode === "edit" && ifMatch ? { headers: { "If-Match": ifMatch } } : {}),
       })) as Record<string, unknown>;
       const data = (res?.data as Record<string, unknown>) ?? res;
       const id = data?.id ? String(data.id) : studentId ?? "";
